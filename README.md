@@ -11,7 +11,6 @@ A conversational AI chatbot designed to assist users with eye-care-related queri
 ├── model.py # Code for loading LLaMA-2 and responding to prompts  
 ├── requirements.txt # Python dependencies  
 ├── README.md # Project documentation  
-├── LICENSE # License file  
 └── .env # (Optional) Environment variables  
 
 
