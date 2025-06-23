@@ -58,6 +58,6 @@ A conversational AI chatbot designed to assist users with eye-care-related queri
 📝 License
 This project is licensed under the MIT License.
 
-🙋‍♀️ Author
-Shreya Mohan
+🙋‍♀️ Author 
+Shreya Mohan  
 GitHub: @shreyaa-mohan
