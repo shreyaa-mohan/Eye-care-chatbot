@@ -1,95 +1,88 @@
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain.prompts import PromptTemplate
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.llms import CTransformers
-from langchain.chains import RetrievalQA
-import chainlit as cl
+import streamlit as st
+from streamlit_chat import message
+from langchain.chains import ConversationalRetrievalChain
+from langchain.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.llms import CTransformers
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.memory import ConversationBufferMemory
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
-DB_FAISS_PATH = 'vectorstore/db_faiss'
+# Load the PDF files from the path
+loader = DirectoryLoader('data/', glob="*.pdf", loader_cls=PyPDFLoader)
+documents = loader.load()
 
-custom_prompt_template = """Use the following pieces of information to answer the user's question.
-If you don't know the answer, just say that you don't know, don't try to make up an answer.
+# Split text into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+text_chunks = text_splitter.split_documents(documents)
 
-Context: {context}
-Question: {question}
+# Create embeddings
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2",
+                                   model_kwargs={'device': "cpu"})
 
-Only return the helpful answer below and nothing else.
-Helpful answer:
-"""
+# Vector store
+vector_store = FAISS.from_documents(text_chunks, embeddings)
 
-def set_custom_prompt():
-    """
-    Prompt template for QA retrieval for each vectorstore
-    """
-    prompt = PromptTemplate(template=custom_prompt_template,
-                            input_variables=['context', 'question'])
-    return prompt
+# Create LLM with streaming
+llm = CTransformers(
+    model="llama-2-7b-chat.ggmlv3.q4_0.bin",
+    model_type="llama",
+    streaming=True,  # Enable streaming
+    callbacks=[StreamingStdOutCallbackHandler()],  # Streaming to console
+    config={'max_new_tokens': 128, 'temperature': 0.01}
+)
 
-#Retrieval QA Chain
-def retrieval_qa_chain(llm, prompt, db):
-    qa_chain = RetrievalQA.from_chain_type(llm=llm,
-                                       chain_type='stuff',
-                                       retriever=db.as_retriever(search_kwargs={'k': 2}),
-                                       return_source_documents=True,
-                                       chain_type_kwargs={'prompt': prompt}
-                                       )
-    return qa_chain
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-#Loading the model
-def load_llm():
-    # Load the locally downloaded model here
-    llm = CTransformers(
-        model = "TheBloke/Llama-2-7B-Chat-GGML",
-        model_type="llama",
-        max_new_tokens = 512,
-        temperature = 0.5
-    )
-    return llm
+chain = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    chain_type='stuff',
+    retriever=vector_store.as_retriever(search_kwargs={"k": 2}),
+    memory=memory
+)
 
-#QA Model Function
-def qa_bot():
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2",
-                                       model_kwargs={'device': 'cpu'})
-    db = FAISS.load_local(DB_FAISS_PATH, embeddings)
-    llm = load_llm()
-    qa_prompt = set_custom_prompt()
-    qa = retrieval_qa_chain(llm, qa_prompt, db)
+st.title("Eyecare ChatBot 🧑🏽‍⚕️")
 
-    return qa
+def conversation_chat(query):
+    if query.strip() == "":  # Handle empty query
+        return "Please ask a valid question."
+    
+    # Get the result from the chain
+    result = chain({"question": query, "chat_history": st.session_state['history']})
+    st.session_state['history'].append((query, result["answer"]))
+    return result["answer"]
 
-#output function
-def final_result(query):
-    qa_result = qa_bot()
-    response = qa_result({'query': query})
-    return response
+def initialize_session_state():
+    if 'history' not in st.session_state:
+        st.session_state['history'] = []
+    if 'generated' not in st.session_state:
+        st.session_state['generated'] = ["Hello! Ask me anything about 🤗"]
+    if 'past' not in st.session_state:
+        st.session_state['past'] = ["Hey! 👋"]
 
-#chainlit code
-@cl.on_chat_start
-async def start():
-    chain = qa_bot()
-    msg = cl.Message(content="Starting the bot...")
-    await msg.send()
-    msg.content = "Hi, Welcome to Medical Bot. What is your query?"
-    await msg.update()
+def display_chat_history():
+    reply_container = st.container()
+    container = st.container()
 
-    cl.user_session.set("chain", chain)
+    with container:
+        with st.form(key='my_form', clear_on_submit=True):
+            user_input = st.text_input("Question:", placeholder="Ask about your Mental Health", key='input')
+            submit_button = st.form_submit_button(label='Send')
 
-@cl.on_message
-async def main(message: cl.Message):
-    chain = cl.user_session.get("chain") 
-    cb = cl.AsyncLangchainCallbackHandler(
-        stream_final_answer=True, answer_prefix_tokens=["FINAL", "ANSWER"]
-    )
-    cb.answer_reached = True
-    res = await chain.acall(message.content, callbacks=[cb])
-    answer = res["result"]
-    sources = res["source_documents"]
+        if submit_button and user_input:
+            output = conversation_chat(user_input)
+            st.session_state['past'].append(user_input)
+            st.session_state['generated'].append(output)
 
-    if sources:
-        answer += f"\nSources:" + str(sources)
-    else:
-        answer += "\nNo sources found"
+    if st.session_state['generated']:
+        with reply_container:
+            for i in range(len(st.session_state['generated'])):
+                message(st.session_state["past"][i], is_user=True, key=str(i) + '_user', avatar_style="thumbs")
+                message(st.session_state["generated"][i], key=str(i), avatar_style="fun-emoji")
 
-    await cl.Message(content=answer).send()
+# Initialize session state
+initialize_session_state()
 
+# Display chat history
+display_chat_history()
