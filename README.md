@@ -43,13 +43,13 @@ A conversational AI chatbot designed to assist users with eye-care-related queri
 - MODEL_PATH=path/to/llama-2-7b-chat.ggmlv3.q8_0.bin
   - Replace path/to/... with your actual model path.
 
-▶️ Running the Chatbot
-- Step 1: Ingest data
+### ▶️ Running the Chatbot
+- Step 1: Ingest data  
 
--- python ingest.py
-- Step 2: Start the chatbot
+ python ingest.py
+- Step 2: Start the chatbot  
 
--- chainlit run model.py -w
+ chainlit run model.py -w
 📌 Notes
 - The LLaMA-2 .bin model is large and not included in the repo.
 
